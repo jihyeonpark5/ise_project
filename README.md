@@ -102,6 +102,7 @@ python .\scripts\00_check_environment.py
 | `06_osm_edges_filtered.parquet` | Step 3 | PM 주행이 부적절한 후보 구간을 제거한 edge 데이터입니다. 이후 도로 기반 변수 생성의 기본 도로망으로 사용합니다. |
 | `07_osm_edges_filtered.geojson` | Step 3 | 필터링된 도로망을 QGIS 등에서 확인하기 위한 GeoJSON 파일입니다. |
 | `08_grid_road_map.parquet` | Step 4 | 50m 격자와 필터링된 도로 edge를 교차시킨 결과입니다. 각 도로가 각 격자 안에서 차지하는 길이 `length_in_grid`를 포함합니다. |
+| `09_facility_zone_grid.parquet` | Step 5 | 50m 격자에 학교, 병원, 노인시설 보호구역 포함 여부 변수를 붙인 결과입니다. |
 
 모든 공간 산출물은 거리 계산과 buffer 계산을 위해 `EPSG:5179` 좌표계로 통일합니다.
 
@@ -181,3 +182,35 @@ python .\scripts\00_check_environment.py
 | `length_in_grid` | 도로 edge가 해당 격자 내부에서 차지하는 길이입니다. 단위는 미터입니다. |
 | `geometry` | 격자 내부에 포함된 도로 segment line geometry입니다. |
 
+### `09_facility_zone_grid.parquet`
+
+| 변수명 | 설명 |
+| --- | --- |
+| `grid_id` | 50m 격자의 고유 ID입니다. |
+| `is_school_zone` | 격자 polygon이 학교 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_hospital_zone` | 격자 polygon이 병원 인접 구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_elderly_zone` | 격자 polygon이 노인시설 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `geometry` | 원본 50m 격자 polygon입니다. |
+
+## Step 5 보호구역 변수 생성 실행 방법
+
+Step 5는 50m 격자와 보호구역 buffer 3종을 polygon 중첩 기준으로 비교하여, 각 격자가 보호구역과 겹치는지 여부를 계산합니다.
+
+```powershell
+python .\scripts\05_facility_zone_variables.py
+```
+
+입력 파일은 아래 네 개입니다.
+
+```text
+data/processed/02_gangnam_grid_50m.parquet
+data/raw/facilities/school_buffer.gpkg
+data/raw/facilities/hospital_buffer.gpkg
+data/raw/facilities/elderly_buffer.gpkg
+```
+
+정상 실행되면 아래 파일이 생성됩니다.
+
+```text
+data/processed/09_facility_zone_grid.parquet
+```
