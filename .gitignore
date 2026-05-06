@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+.cache/
+
+# Build / test artifacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Large raw data
+data/raw/boundary/seoul_sig.cpg
+data/raw/boundary/seoul_sig.dbf
+data/raw/boundary/seoul_sig.prj
+data/raw/boundary/seoul_sig.shp
+data/raw/boundary/seoul_sig.shx
