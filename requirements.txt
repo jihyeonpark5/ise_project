@@ -1,0 +1,12 @@
+osmnx
+geopandas
+pandas
+numpy
+scikit-learn
+folium
+shapely
+pyproj
+statsmodels
+pyarrow
+matplotlib
+ortools
