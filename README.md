@@ -103,6 +103,11 @@ python .\scripts\00_check_environment.py
 | `07_osm_edges_filtered.geojson` | Step 3 | 필터링된 도로망을 QGIS 등에서 확인하기 위한 GeoJSON 파일입니다. |
 | `08_grid_road_map.parquet` | Step 4 | 50m 격자와 필터링된 도로 edge를 교차시킨 결과입니다. 각 도로가 각 격자 안에서 차지하는 길이 `length_in_grid`를 포함합니다. |
 | `09_facility_zone_grid.parquet` | Step 5 | 50m 격자에 학교, 병원, 노인시설 보호구역 포함 여부 변수를 붙인 결과입니다. |
+| `10_dynamic_variables.parquet` | Step 6 | 동적 변수 생성 결과입니다. 보호구역 여부, 시간대별 보행량, 시간대별 차량량, `pm_accident`를 포함하며 geometry는 50m grid polygon을 유지합니다. |
+| `static_grid.parquet` | Step 5 | 정적 변수 생성 결과입니다. `intersection_count`, `road_type_score`, `geometry`를 포함합니다. |
+| `merged_grid_variables.parquet` | Step 7 | 정적 변수와 동적 변수를 `grid_id` 기준으로 통합한 전체 격자 데이터입니다. |
+| `final_grid_variables_normalized.parquet` | Step 7 | 전체 격자를 유지한 정규화 결과입니다. 원본 변수, `_norm` 컬럼, grid polygon geometry를 함께 포함합니다. |
+| `model_input_variables.parquet` | Step 7 | 모델 학습 전용 최소 입력 파일입니다. `road_type_score` 결측 행을 제외하고 `grid_id`, 이진 변수, `pm_accident`, `_norm` 연속형 변수만 유지합니다. geometry와 원본 연속형 값은 포함하지 않습니다. |
 
 모든 공간 산출물은 거리 계산과 buffer 계산을 위해 `EPSG:5179` 좌표계로 통일합니다.
 
@@ -192,25 +197,92 @@ python .\scripts\00_check_environment.py
 | `is_elderly_zone` | 격자 polygon이 노인시설 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
 | `geometry` | 원본 50m 격자 polygon입니다. |
 
-## Step 5 보호구역 변수 생성 실행 방법
+### `10_dynamic_variables.parquet`
 
-Step 5는 50m 격자와 보호구역 buffer 3종을 polygon 중첩 기준으로 비교하여, 각 격자가 보호구역과 겹치는지 여부를 계산합니다.
+| 변수명 | 설명 |
+| --- | --- |
+| `grid_id` | 50m 격자의 고유 ID입니다. |
+| `is_school_zone` | 격자 polygon이 학교 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_hospital_zone` | 격자 polygon이 병원 인접 구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_elderly_zone` | 격자 polygon이 노인시설 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `pedestrian_10h` | 해당 격자의 10시 기준 보행량 변수입니다. |
+| `pedestrian_18h` | 해당 격자의 18시 기준 보행량 변수입니다. |
+| `pedestrian_22h` | 해당 격자의 22시 기준 보행량 변수입니다. |
+| `vehicle_10h` | 해당 격자의 10시 기준 차량량 변수입니다. |
+| `vehicle_18h` | 해당 격자의 18시 기준 차량량 변수입니다. |
+| `vehicle_22h` | 해당 격자의 22시 기준 차량량 변수입니다. |
+| `pm_accident` | 해당 격자에 PM 사고가 있으면 `1`, 아니면 `0`입니다. |
+| `geometry` | 원본 50m 격자 polygon입니다. |
 
-```powershell
-python .\scripts\05_facility_zone_variables.py
-```
+### `merged_grid_variables.parquet`
 
-입력 파일은 아래 네 개입니다.
+| 변수명 | 설명 |
+| --- | --- |
+| `grid_id` | 50m 격자의 고유 ID입니다. |
+| `intersection_count` | 해당 격자 내부의 교차로 수입니다. |
+| `road_type_score` | 해당 격자의 도로 유형 점수입니다. |
+| `is_school_zone` | 격자 polygon이 학교 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_hospital_zone` | 격자 polygon이 병원 인접 구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_elderly_zone` | 격자 polygon이 노인시설 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `pedestrian_10h` | 해당 격자의 10시 기준 보행량 변수입니다. |
+| `pedestrian_18h` | 해당 격자의 18시 기준 보행량 변수입니다. |
+| `pedestrian_22h` | 해당 격자의 22시 기준 보행량 변수입니다. |
+| `vehicle_10h` | 해당 격자의 10시 기준 차량량 변수입니다. |
+| `vehicle_18h` | 해당 격자의 18시 기준 차량량 변수입니다. |
+| `vehicle_22h` | 해당 격자의 22시 기준 차량량 변수입니다. |
+| `pm_accident` | 해당 격자에 PM 사고가 있으면 `1`, 아니면 `0`입니다. |
+| `geometry` | 원본 50m 격자 polygon입니다. |
 
-```text
-data/processed/02_gangnam_grid_50m.parquet
-data/raw/facilities/school_buffer.gpkg
-data/raw/facilities/hospital_buffer.gpkg
-data/raw/facilities/elderly_buffer.gpkg
-```
+### `final_grid_variables_normalized.parquet`
 
-정상 실행되면 아래 파일이 생성됩니다.
+| 변수명 | 설명 |
+| --- | --- |
+| `grid_id` | 50m 격자의 고유 ID입니다. |
+| `intersection_count` | 해당 격자 내부의 교차로 수 원본값입니다. |
+| `road_type_score` | 해당 격자의 도로 유형 점수 원본값입니다. |
+| `is_school_zone` | 격자 polygon이 학교 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_hospital_zone` | 격자 polygon이 병원 인접 구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_elderly_zone` | 격자 polygon이 노인시설 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `pedestrian_10h` | 해당 격자의 10시 기준 보행량 원본값입니다. |
+| `pedestrian_18h` | 해당 격자의 18시 기준 보행량 원본값입니다. |
+| `pedestrian_22h` | 해당 격자의 22시 기준 보행량 원본값입니다. |
+| `vehicle_10h` | 해당 격자의 10시 기준 차량량 원본값입니다. |
+| `vehicle_18h` | 해당 격자의 18시 기준 차량량 원본값입니다. |
+| `vehicle_22h` | 해당 격자의 22시 기준 차량량 원본값입니다. |
+| `pm_accident` | 해당 격자에 PM 사고가 있으면 `1`, 아니면 `0`입니다. |
+| `intersection_count_norm` | `intersection_count`를 Min-Max 0~1 정규화한 값입니다. |
+| `road_type_score_norm` | `road_type_score`를 Min-Max 0~1 정규화한 값입니다. |
+| `pedestrian_10h_norm` | `pedestrian_10h`를 Min-Max 0~1 정규화한 값입니다. |
+| `pedestrian_18h_norm` | `pedestrian_18h`를 Min-Max 0~1 정규화한 값입니다. |
+| `pedestrian_22h_norm` | `pedestrian_22h`를 Min-Max 0~1 정규화한 값입니다. |
+| `vehicle_10h_norm` | `vehicle_10h`를 Min-Max 0~1 정규화한 값입니다. |
+| `vehicle_18h_norm` | `vehicle_18h`를 Min-Max 0~1 정규화한 값입니다. |
+| `vehicle_22h_norm` | `vehicle_22h`를 Min-Max 0~1 정규화한 값입니다. |
+| `geometry` | 원본 50m 격자 polygon입니다. |
 
-```text
-data/processed/09_facility_zone_grid.parquet
-```
+### `model_input_variables.parquet`
+
+| 변수명 | 설명 |
+| --- | --- |
+| `grid_id` | 50m 격자의 고유 ID입니다. |
+| `is_school_zone` | 격자 polygon이 학교 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_hospital_zone` | 격자 polygon이 병원 인접 구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `is_elderly_zone` | 격자 polygon이 노인시설 보호구역 buffer와 겹치면 `1`, 아니면 `0`입니다. |
+| `pm_accident` | 해당 격자에 PM 사고가 있으면 `1`, 아니면 `0`입니다. |
+| `intersection_count_norm` | `intersection_count`를 Min-Max 0~1 정규화한 값입니다. |
+| `road_type_score_norm` | `road_type_score`를 Min-Max 0~1 정규화한 값입니다. |
+| `pedestrian_10h_norm` | `pedestrian_10h`를 Min-Max 0~1 정규화한 값입니다. |
+| `pedestrian_18h_norm` | `pedestrian_18h`를 Min-Max 0~1 정규화한 값입니다. |
+| `pedestrian_22h_norm` | `pedestrian_22h`를 Min-Max 0~1 정규화한 값입니다. |
+| `vehicle_10h_norm` | `vehicle_10h`를 Min-Max 0~1 정규화한 값입니다. |
+| `vehicle_18h_norm` | `vehicle_18h`를 Min-Max 0~1 정규화한 값입니다. |
+| `vehicle_22h_norm` | `vehicle_22h`를 Min-Max 0~1 정규화한 값입니다. |
+
+## output files
+
+| File | Description |
+| --- | --- |
+| `gangnam_grid_preview.png` | Step 2 격자 생성 결과를 확인하는 preview image입니다. |
+| `osm_roads_preview.png` | 도로 수집 및 필터링 결과를 확인하는 preview image입니다. |
+| `missing_road_type_score_grids.geojson` | `road_type_score`가 결측인 격자만 추출한 GIS 확인용 파일입니다. |
+| `missing_road_type_score_map.html` | `road_type_score` 결측 격자를 브라우저에서 확인하는 지도 파일입니다. |
