@@ -108,6 +108,7 @@ python .\scripts\00_check_environment.py
 | `merged_grid_variables.parquet` | Step 7 | 정적 변수와 동적 변수를 `grid_id` 기준으로 통합한 전체 격자 데이터입니다. |
 | `final_grid_variables_normalized.parquet` | Step 7 | 전체 격자를 유지한 정규화 결과입니다. 원본 변수, `_norm` 컬럼, grid polygon geometry를 함께 포함합니다. |
 | `model_input_variables.parquet` | Step 7 | 모델 학습 전용 최소 입력 파일입니다. `road_type_score` 결측 행을 제외하고 `grid_id`, 이진 변수, `pm_accident`, `_norm` 연속형 변수만 유지합니다. geometry와 원본 연속형 값은 포함하지 않습니다. |
+| `risk_score_grid.parquet` | Step 10 | 로지스틱 회귀 기반 위험도 모델 산출 결과입니다. 격자별·시간대별(10h/18h/22h) Risk Score, 4단계 위험등급, 시나리오(S0/S1/S2)별 제한속도를 포함합니다. |
 
 모든 공간 산출물은 거리 계산과 buffer 계산을 위해 `EPSG:5179` 좌표계로 통일합니다.
 
@@ -277,6 +278,21 @@ python .\scripts\00_check_environment.py
 | `vehicle_10h_norm` | `vehicle_10h`를 Min-Max 0~1 정규화한 값입니다. |
 | `vehicle_18h_norm` | `vehicle_18h`를 Min-Max 0~1 정규화한 값입니다. |
 | `vehicle_22h_norm` | `vehicle_22h`를 Min-Max 0~1 정규화한 값입니다. |
+
+### `risk_score_grid.parquet`
+
+| 변수명 | 설명 |
+| --- | --- |
+| `grid_id` | 50m 격자의 고유 ID입니다. |
+| `RS_10h` | 10시 기준 Risk Score입니다. 범위는 0~100입니다. |
+| `RS_18h` | 18시 기준 Risk Score입니다. 범위는 0~100입니다. |
+| `RS_22h` | 22시 기준 Risk Score입니다. 범위는 0~100입니다. |
+| `risk_level_10h` | 10시 RS를 4단계로 분류한 위험등급입니다. 일반(0~25) / 주의(25~50) / 위험(50~75) / 고위험(75~100). |
+| `risk_level_18h` | 18시 RS를 4단계로 분류한 위험등급입니다. |
+| `risk_level_22h` | 22시 RS를 4단계로 분류한 위험등급입니다. |
+| `speed_S0_{hour}` | S0 시나리오(전 구간 25km/h 고정) 제한속도입니다. hour는 10h/18h/22h. |
+| `speed_S1_{hour}` | S1 시나리오(등급별 25/20/15/10 km/h) 제한속도입니다. |
+| `speed_S2_{hour}` | S2 시나리오(등급별 20/15/10/7 km/h) 제한속도입니다. |
 
 ## output files
 
