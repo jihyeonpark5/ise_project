@@ -10,8 +10,9 @@ import geopandas as gpd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 STATIC_PATH = PROCESSED_DIR / "static_grid.parquet"
-DYNAMIC_PATH = PROCESSED_DIR / "11_dynamic_variables.parquet"
+DYNAMIC_PATH = PROCESSED_DIR / "10_dynamic_variables.parquet"
 OUTPUT_PATH = PROCESSED_DIR / "merged_grid_variables.parquet"
+DYNAMIC_DATA_LABEL = DYNAMIC_PATH.stem
 
 # 모든 공간 데이터는 EPSG:5179로 맞춰 사용한다.
 TARGET_CRS = "EPSG:5179"
@@ -172,10 +173,10 @@ def validate_result(static_gdf: gpd.GeoDataFrame, dynamic_gdf: gpd.GeoDataFrame,
 def print_summary(summary: dict[str, int]) -> None:
     # 사용자가 바로 확인할 수 있도록 핵심 검증 결과를 보기 좋게 출력한다.
     log(f"static_grid 행 수: {summary['static_rows']}")
-    log(f"11_dynamic_variables 행 수: {summary['dynamic_rows']}")
+    log(f"{DYNAMIC_DATA_LABEL} 행 수: {summary['dynamic_rows']}")
     log(f"병합 결과 행 수: {summary['result_rows']}")
     log(f"static_grid 중복 grid_id 수: {summary['static_duplicates']}")
-    log(f"11_dynamic_variables 중복 grid_id 수: {summary['dynamic_duplicates']}")
+    log(f"{DYNAMIC_DATA_LABEL} 중복 grid_id 수: {summary['dynamic_duplicates']}")
     log(f"static에만 있는 grid_id 수: {summary['only_in_static']}")
     log(f"dynamic에만 있는 grid_id 수: {summary['only_in_dynamic']}")
     log(f"road_type_score 결측 개수: {summary['road_type_score_missing']}")

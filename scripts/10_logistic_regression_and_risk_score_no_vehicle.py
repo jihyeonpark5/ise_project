@@ -1,0 +1,271 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
+
+INPUT_PATH = PROCESSED_DIR / "model_input_variables.parquet"
+OUTPUT_PATH = PROCESSED_DIR / "risk_score_grid_no_vehicle.parquet"
+
+TARGET_COL = "pm_accident"
+
+STATIC_FEATURE_COLS = [
+    "intersection_count_norm",
+    "road_type_score_norm",
+    "is_school_zone",
+    "is_hospital_zone",
+    "is_elderly_zone",
+]
+
+# vehicle_*_norm은 아직 더미이므로 제외하고 pedestrian만 시간대별로 사용한다.
+DYNAMIC_FEATURES: dict[str, str] = {
+    "10h": "pedestrian_10h_norm",
+    "18h": "pedestrian_18h_norm",
+    "22h": "pedestrian_22h_norm",
+}
+
+TRAIN_HOUR = "18h"
+VIF_THRESHOLD = 10.0
+RISK_BINS = [0.0, 25.0, 50.0, 75.0, 100.0]
+RISK_LABELS = ["일반", "주의", "위험", "고위험"]
+SCENARIO_SPEED: dict[str, list[int]] = {
+    "S0": [25, 25, 25, 25],
+    "S1": [25, 20, 15, 10],
+    "S2": [20, 15, 10, 7],
+}
+CV_FOLDS = 5
+
+
+def log(message: str) -> None:
+    print(message)
+
+
+def ensure_output_directory() -> None:
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_input_data() -> pd.DataFrame:
+    if not INPUT_PATH.exists():
+        raise FileNotFoundError(
+            "모델 입력 파일이 없습니다. "
+            "먼저 scripts/09_normalize_variables.py를 실행해 주세요. "
+            f"누락 파일: {INPUT_PATH}"
+        )
+
+    df = pd.read_parquet(INPUT_PATH)
+
+    required_cols = {TARGET_COL, "grid_id", *STATIC_FEATURE_COLS, *DYNAMIC_FEATURES.values()}
+    missing_cols = required_cols - set(df.columns)
+    if missing_cols:
+        raise ValueError(f"입력 파일에 필요한 컬럼이 없습니다: {sorted(missing_cols)}")
+
+    if df.empty:
+        raise ValueError("입력 파일이 비어 있습니다.")
+
+    if df["grid_id"].duplicated().any():
+        raise ValueError(f"grid_id 중복이 있습니다: {int(df['grid_id'].duplicated().sum())}개")
+
+    return df
+
+
+def run_vif_analysis(X: pd.DataFrame) -> pd.DataFrame:
+    binary_cols = [c for c in X.columns if set(X[c].dropna().unique()).issubset({0, 1})]
+    numeric_cols = [c for c in X.columns if c not in binary_cols]
+
+    log("\n=== VIF 다중공선성 진단 ===")
+
+    if not numeric_cols:
+        log("연속형 변수가 없어 VIF 분석을 건너뜁니다.")
+        return pd.DataFrame(columns=["feature", "VIF"])
+
+    X_num = X[numeric_cols].copy()
+    vif_values = [variance_inflation_factor(X_num.values, i) for i in range(X_num.shape[1])]
+    vif_df = pd.DataFrame({"feature": numeric_cols, "VIF": vif_values})
+    vif_df = vif_df.sort_values("VIF", ascending=False).reset_index(drop=True)
+
+    for _, row in vif_df.iterrows():
+        flag = " [주의] (VIF > 10)" if row["VIF"] > VIF_THRESHOLD else ""
+        log(f"  {row['feature']}: VIF = {row['VIF']:.4f}{flag}")
+
+    high_vif = vif_df[vif_df["VIF"] > VIF_THRESHOLD]
+    if not high_vif.empty:
+        log(f"\n  [WARN] VIF > {VIF_THRESHOLD} 변수 {len(high_vif)}개 발견 - 보고서에 기재 필요")
+    else:
+        log(f"  [OK] 모든 연속형 변수의 VIF <= {VIF_THRESHOLD} - 다중공선성 문제 없음")
+
+    return vif_df
+
+
+def build_feature_matrix(df: pd.DataFrame, hour: str) -> tuple[pd.DataFrame, list[str]]:
+    pedestrian_col = DYNAMIC_FEATURES[hour]
+    feature_cols = STATIC_FEATURE_COLS + [pedestrian_col]
+    X = df[feature_cols].copy().fillna(0.0)
+    return X, feature_cols
+
+
+def train_logistic_regression(
+    df: pd.DataFrame,
+) -> tuple[LogisticRegression, StandardScaler, np.ndarray, list[str]]:
+    X_df, feature_cols = build_feature_matrix(df, TRAIN_HOUR)
+    y = df[TARGET_COL].astype(int)
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_df)
+
+    model = LogisticRegression(
+        class_weight="balanced",
+        max_iter=1000,
+        solver="lbfgs",
+        random_state=42,
+    )
+    model.fit(X_scaled, y)
+
+    betas = np.abs(model.coef_[0])
+    weights = betas / betas.sum()
+
+    return model, scaler, weights, feature_cols
+
+
+def evaluate_model(
+    model: LogisticRegression,
+    scaler: StandardScaler,
+    df: pd.DataFrame,
+    feature_cols: list[str],
+) -> None:
+    X_df = df[feature_cols].fillna(0.0)
+    X_scaled = scaler.transform(X_df)
+    y = df[TARGET_COL].astype(int)
+
+    y_pred = model.predict(X_scaled)
+    y_prob = model.predict_proba(X_scaled)[:, 1]
+
+    log("\n=== 모델 성능 평가 (대표 시간대: 18h, vehicle 제외) ===")
+    log(classification_report(y, y_pred, target_names=["사고 없음", "사고 발생"]))
+
+    auc = roc_auc_score(y, y_prob)
+    log(f"  AUC-ROC: {auc:.4f}")
+
+    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(model, X_scaled, y, cv=cv, scoring="roc_auc")
+    log(f"  {CV_FOLDS}-Fold 교차검증 AUC: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
+
+
+def compute_risk_scores(
+    df: pd.DataFrame,
+    weights: np.ndarray,
+) -> pd.DataFrame:
+    result = df[["grid_id"]].copy()
+
+    static_weights = weights[: len(STATIC_FEATURE_COLS)]
+    pedestrian_weight = weights[-1]
+    static_matrix = df[STATIC_FEATURE_COLS].fillna(0.0).to_numpy()
+    static_score = (static_matrix * static_weights).sum(axis=1)
+
+    for hour, pedestrian_col in DYNAMIC_FEATURES.items():
+        pedestrian_values = df[pedestrian_col].fillna(0.0).to_numpy()
+        rs = (static_score + pedestrian_weight * pedestrian_values) * 100.0
+        rs = np.clip(rs, 0.0, 100.0)
+        result[f"RS_{hour}"] = np.round(rs, 4)
+
+    return result
+
+
+def assign_risk_levels(result: pd.DataFrame) -> pd.DataFrame:
+    for hour in DYNAMIC_FEATURES:
+        rs_col = f"RS_{hour}"
+        level_col = f"risk_level_{hour}"
+
+        result[level_col] = pd.cut(
+            result[rs_col],
+            bins=RISK_BINS,
+            labels=RISK_LABELS,
+            include_lowest=True,
+        )
+
+        for scenario, speeds in SCENARIO_SPEED.items():
+            speed_col = f"speed_{scenario}_{hour}"
+            result[speed_col] = result[level_col].map(
+                {label: speeds[i] for i, label in enumerate(RISK_LABELS)}
+            ).astype("Int64")
+
+    return result
+
+
+def print_weight_summary(weights: np.ndarray, feature_cols: list[str]) -> None:
+    log("\n=== 로지스틱 회귀 가중치 (vehicle 제외) ===")
+    sorted_idx = np.argsort(weights)[::-1]
+    for i in sorted_idx:
+        bar = "#" * int(weights[i] * 40)
+        log(f"  {feature_cols[i]:<35s}: {weights[i]:.4f}  {bar}")
+    log(f"  가중치 합계: {weights.sum():.6f}  (1.0 기준)")
+
+
+def print_rs_summary(result: pd.DataFrame) -> None:
+    log("\n=== Risk Score 요약 ===")
+    for hour in DYNAMIC_FEATURES:
+        rs_col = f"RS_{hour}"
+        level_col = f"risk_level_{hour}"
+        log(f"\n  [{hour}]")
+        log(
+            f"    RS min/max/mean: "
+            f"{result[rs_col].min():.2f} / "
+            f"{result[rs_col].max():.2f} / "
+            f"{result[rs_col].mean():.2f}"
+        )
+        log(f"    위험등급 분포:\n{result[level_col].value_counts().to_string()}")
+
+
+def save_result(result: pd.DataFrame) -> None:
+    ensure_output_directory()
+    result.to_parquet(OUTPUT_PATH, index=False)
+    log(f"\n결과 저장 완료: {OUTPUT_PATH}")
+    log(f"저장된 컬럼: {result.columns.tolist()}")
+
+
+def main() -> int:
+    log("=== Step 10: vehicle 제외 위험도 모델 및 Risk Score 산출 ===\n")
+
+    try:
+        df = load_input_data()
+        log(f"입력 데이터 로드 완료: {len(df)}개 격자")
+        log(f"사고 발생 격자: {int(df[TARGET_COL].sum())}개 ({df[TARGET_COL].mean() * 100:.1f}%)")
+
+        X_train_df, feature_cols = build_feature_matrix(df, TRAIN_HOUR)
+        run_vif_analysis(X_train_df)
+
+        log("\n=== 로지스틱 회귀 학습 (대표 시간대: 18h, vehicle 제외) ===")
+        model, scaler, weights, feature_cols = train_logistic_regression(df)
+        print_weight_summary(weights, feature_cols)
+
+        evaluate_model(model, scaler, df, feature_cols)
+
+        log("\n=== 시간대별 Risk Score 산출 (10h / 18h / 22h, vehicle 제외) ===")
+        result = compute_risk_scores(df, weights)
+        result = assign_risk_levels(result)
+        print_rs_summary(result)
+        save_result(result)
+
+        log("\nStep 10(vehicle 제외)이 정상 완료되었습니다.")
+        return 0
+    except Exception as exc:
+        log(f"\nStep 10(vehicle 제외) 실행 실패: {exc}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

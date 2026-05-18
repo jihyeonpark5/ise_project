@@ -14,7 +14,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # ──────────────────────────────────────────────
 # 경로 설정
-# ──────────────────────────────────────────────
+# 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 OUTPUT_DIR    = PROJECT_ROOT / "data" / "output"
@@ -23,7 +23,7 @@ INPUT_PATH  = PROCESSED_DIR / "model_input_variables.parquet"
 OUTPUT_PATH = PROCESSED_DIR / "risk_score_grid.parquet"
 
 # ──────────────────────────────────────────────
-# 변수 정의
+# 변수 정의──────────────────────────────────────────────
 # ──────────────────────────────────────────────
 # 종속변수
 TARGET_COL = "pm_accident"
@@ -146,9 +146,9 @@ def run_vif_analysis(X: pd.DataFrame) -> pd.DataFrame:
 
     high_vif = vif_df[vif_df["VIF"] > VIF_THRESHOLD]
     if not high_vif.empty:
-        log(f"\n  ⚠ VIF > {VIF_THRESHOLD} 변수 {len(high_vif)}개 발견 — 보고서에 기재 필요")
+        log(f"\n  [WARN] VIF > {VIF_THRESHOLD} 변수 {len(high_vif)}개 발견 - 보고서에 기재 필요")
     else:
-        log(f"  ✓ 모든 연속형 변수의 VIF ≤ {VIF_THRESHOLD} — 다중공선성 문제 없음")
+        log(f"  [OK] 모든 연속형 변수의 VIF <= {VIF_THRESHOLD} - 다중공선성 문제 없음")
 
     return vif_df
 
@@ -226,7 +226,7 @@ def evaluate_model(
     # 층화 k-fold 교차검증
     cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=42)
     cv_scores = cross_val_score(model, X_scaled, y, cv=cv, scoring="roc_auc")
-    log(f"  {CV_FOLDS}-Fold 교차검증 AUC: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    log(f"  {CV_FOLDS}-Fold 교차검증 AUC: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
 
 
 # ──────────────────────────────────────────────
@@ -311,10 +311,10 @@ def assign_risk_levels(result: pd.DataFrame) -> pd.DataFrame:
 # ──────────────────────────────────────────────
 def print_weight_summary(weights: np.ndarray, feature_cols: list[str]) -> None:
     """변수별 가중치를 내림차순으로 출력한다."""
-    log("\n=== 로지스틱 회귀 가중치 (wᵢ = |β*ᵢ| / Σ|β*ⱼ|) ===")
+    log("\n=== 로지스틱 회귀 가중치 (w_i = abs(beta_i) / sum(abs(beta))) ===")
     sorted_idx = np.argsort(weights)[::-1]
     for i in sorted_idx:
-        bar = "█" * int(weights[i] * 40)
+        bar = "#" * int(weights[i] * 40)
         log(f"  {feature_cols[i]:<35s}: {weights[i]:.4f}  {bar}")
     log(f"  가중치 합계: {weights.sum():.6f}  (1.0 기준)")
 
