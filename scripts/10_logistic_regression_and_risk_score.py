@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
@@ -225,7 +226,16 @@ def evaluate_model(
 
     # 층화 k-fold 교차검증
     cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=42)
-    cv_scores = cross_val_score(model, X_scaled, y, cv=cv, scoring="roc_auc")
+    cv_model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(
+            class_weight="balanced",
+            max_iter=1000,
+            solver="lbfgs",
+            random_state=42,
+        ),
+    )
+    cv_scores = cross_val_score(cv_model, X_df, y, cv=cv, scoring="roc_auc")
     log(f"  {CV_FOLDS}-Fold 교차검증 AUC: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
 
 
